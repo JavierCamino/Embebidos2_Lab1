@@ -119,18 +119,33 @@ void rtos_start_scheduler(void)
 rtos_task_handle_t rtos_create_task(void (*task_body)(), uint8_t priority,
 		rtos_autostart_e autostart)
 {
+	/* Create variable to store the task handler to be returned. */
 	rtos_task_handle_t retval;
-	if((RTOS_MAX_NUMBER_OF_TASKS -1) < task_list.nTasks)
+
+	/* If there is no more space for tasks, return error. */
+	if( (RTOS_MAX_NUMBER_OF_TASKS - 1) < task_list.nTasks )
 	{
 		retval = -1;
 	}
+	/* If there is still space, create the task. */
 	else
 	{
-		task_list.tasks[task_list.nTasks].state      = autostart == kAutoStart ? S_READY : S_SUSPENDED;
+	/* Add the task to the task list and fill in the structure fields with the
+	 * pertinent information.
+	 * */
+
+		/* Start or stop the task according to the function argument. */
+		task_list.tasks[task_list.nTasks].state      = (autostart == kAutoStart) ? (S_READY) : (S_SUSPENDED);
+		/* Assign task priority. */
 		task_list.tasks[task_list.nTasks].priority 	 = priority;
+		/* Point to task body function. */
 		task_list.tasks[task_list.nTasks].task_body  = task_body;
+		/* Reference start time for the created task. */
 		task_list.tasks[task_list.nTasks].local_tick = 0;
+
+		/* Assign to the return variable the index of the newborn task. */
 		retval										 = task_list.nTasks;
+		/* Increment the number of tasks on the system. */
 		task_list.nTasks++;
 	}
 
