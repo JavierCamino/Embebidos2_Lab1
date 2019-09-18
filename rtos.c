@@ -92,16 +92,28 @@ static void idle_task(void);
 // API implementation
 /**********************************************************************************/
 
+
+/**
+ * This function initializes the OS	by reseting the global timer and creating the
+ * idle task.
+ */
 void rtos_start_scheduler(void)
 {
+
+	/* Enable the "is alive" channel (Green LED). */
 #ifdef RTOS_ENABLE_IS_ALIVE
 	init_is_alive();
 #endif
+
+	/* Enable the SysTick timer. */
 	SysTick->CTRL = SysTick_CTRL_CLKSOURCE_Msk | SysTick_CTRL_TICKINT_Msk
 	        | SysTick_CTRL_ENABLE_Msk;
+
+	/* Reload the SysTick with a 0. */
 	reload_systick();
-	for (;;)
-		;
+
+	/* Infinite loop. */
+	for (;;);
 }
 
 rtos_task_handle_t rtos_create_task(void (*task_body)(), uint8_t priority,
