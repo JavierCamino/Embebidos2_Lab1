@@ -119,7 +119,22 @@ void rtos_start_scheduler(void)
 rtos_task_handle_t rtos_create_task(void (*task_body)(), uint8_t priority,
 		rtos_autostart_e autostart)
 {
+	rtos_task_handle_t retval;
+	if((RTOS_MAX_NUMBER_OF_TASKS -1) < task_list.nTasks)
+	{
+		retval = -1;
+	}
+	else
+	{
+		task_list.tasks[task_list.nTasks].state      = autostart == kAutoStart ? S_READY : S_SUSPENDED;
+		task_list.tasks[task_list.nTasks].priority 	 = priority;
+		task_list.tasks[task_list.nTasks].task_body  = task_body;
+		task_list.tasks[task_list.nTasks].local_tick = 0;
+		retval										 = task_list.nTasks;
+		task_list.nTasks++;
+	}
 
+	return retval;
 }
 
 rtos_tick_t rtos_get_clock(void)
@@ -195,7 +210,11 @@ void SysTick_Handler(void)
 
 void PendSV_Handler(void)
 {
-
+	register int32_t r0 asm("r0");
+	(void) r0;
+	SCB->ICSR |= SCB_ICSR_PENDSVCLR_Msk;
+	r0 		   = (int32_t) task_list.tasks[task_list.current_task].sp;
+	asm("mov r7, r0");
 }
 
 /**********************************************************************************/
