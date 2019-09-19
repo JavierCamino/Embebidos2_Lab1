@@ -23,7 +23,9 @@
 #define FORCE_INLINE 	__attribute__((always_inline)) inline
 
 #define STACK_FRAME_SIZE			8
+
 #define STACK_LR_OFFSET				2
+
 #define STACK_PSR_OFFSET			1
 #define STACK_PSR_DEFAULT			0x01000000
 
@@ -39,6 +41,15 @@
 static void init_is_alive(void);
 static void refresh_is_alive(void);
 #endif
+
+/**********************************************************************************/
+// Name substitutions
+/**********************************************************************************/
+
+#define current_task_ptr &task_list.tasks[task_list.current_task]
+#define newborn_task_ptr &task_list.tasks[task_list.nTasks]
+#define idle_task_index 0
+#define idle_task_addr &task_list.tasks[idel_task_index]
 
 /**********************************************************************************/
 // Type definitions
@@ -78,6 +89,9 @@ struct
 } task_list =
 { 0 };
 
+// Global static flag of first context switch
+uint8_t first_context_switch = 0;
+
 /**********************************************************************************/
 // Local methods prototypes
 /**********************************************************************************/
@@ -93,10 +107,6 @@ static void idle_task(void);
 /**********************************************************************************/
 
 
-/**
- * This function initializes the OS	by reseting the global timer and creating the
- * idle task.
- */
 void rtos_start_scheduler(void)
 {
 
@@ -105,12 +115,19 @@ void rtos_start_scheduler(void)
 	init_is_alive();
 #endif
 
+
 	/* Enable the SysTick timer. */
 	SysTick->CTRL = SysTick_CTRL_CLKSOURCE_Msk | SysTick_CTRL_TICKINT_Msk
 	        | SysTick_CTRL_ENABLE_Msk;
 
+
 	/* Reload the SysTick with a 0. */
 	reload_systick();
+
+
+	/* Create idle task. */
+	rtos_create_task(idle_task, 0, kAutoStart);
+
 
 	/* Infinite loop. */
 	for (;;);
@@ -119,57 +136,65 @@ void rtos_start_scheduler(void)
 rtos_task_handle_t rtos_create_task(void (*task_body)(), uint8_t priority,
 		rtos_autostart_e autostart)
 {
-	/* Create variable to store the task handler to be returned. */
-	rtos_task_handle_t retval;
-
 	/* If there is no more space for tasks, return error. */
-	if( (RTOS_MAX_NUMBER_OF_TASKS - 1) < task_list.nTasks )
-	{
-		retval = -1;
-	}
-	/* If there is still space, create the task. */
-	else
-	{
-	/* Add the task to the task list and fill in the structure fields with the
+		if( (RTOS_MAX_NUMBER_OF_TASKS - 1) < task_list.nTasks )	return (-1);
+
+
+
+	/* Task structure:
+
+	uint8_t priority;
+	task_state_e state;
+	uint32_t *sp;
+	void (*task_body)();
+	rtos_tick_t local_tick;
+	uint32_t reserved[10];
+	uint32_t stack[RTOS_STACK_SIZE];
+	*/
+
+	/* Add the task to the task list by filling in the structure fields with the
 	 * pertinent information.
 	 * */
+	newborn_task_ptr->priority 	 = priority;
+	newborn_task_ptr->state      = (kAutoStart == autostart) ? (S_READY) : (S_SUSPENDED);
+	newborn_task_ptr->sp		 = newborn_task_ptr->stack[RTOS_STACK_SIZE - STACK_FRAME_SIZE];
+	newborn_task_ptr->task_body  = task_body;
+	newborn_task_ptr->local_tick = 0;
 
-		/* Start or stop the task according to the function argument. */
-		task_list.tasks[task_list.nTasks].state      = (autostart == kAutoStart) ? (S_READY) : (S_SUSPENDED);
-		/* Assign task priority. */
-		task_list.tasks[task_list.nTasks].priority 	 = priority;
-		/* Point to task body function. */
-		task_list.tasks[task_list.nTasks].task_body  = task_body;
-		/* Reference start time for the created task. */
-		task_list.tasks[task_list.nTasks].local_tick = 0;
+	/* Initialize the newborn task's stack frame */
+	newborn_task_ptr->stack[RTOS_STACK_SIZE - STACK_PSR_OFFSET] = STACK_PSR_DEFAULT;
+	newborn_task_ptr->stack[RTOS_STACK_SIZE - STACK_LR_OFFSET ] = task_body;
 
-		/* Assign to the return variable the index of the newborn task. */
-		retval										 = task_list.nTasks;
-		/* Increment the number of tasks on the system. */
-		task_list.nTasks++;
-	}
 
-	return retval;
+	/* Increment the number of tasks on the system. */
+	task_list.nTasks++;
+
+	/* Return the newborn task index on the task list. */
+	return task_list.nTasks;
 }
 
 rtos_tick_t rtos_get_clock(void)
 {
-	return 0;
+	return ( (rtos_tick_t) CLOCK_GetCoreSysClkFreq() );
 }
 
 void rtos_delay(rtos_tick_t ticks)
 {
-
+	current_task_ptr->state      = S_WAITING;
+	current_task_ptr->local_tick = ticks;
+	dispatcher(kFromNormalExec);
 }
 
 void rtos_suspend_task(void)
 {
-
+	current_task_ptr->state = S_SUSPENDED;
+	dispatcher(kFromNormalExec);
 }
 
 void rtos_activate_task(rtos_task_handle_t task)
 {
-
+	current_task_ptr->state = S_READY;
+	dispatcher(kFromNormalExec);
 }
 
 /**********************************************************************************/
@@ -185,17 +210,59 @@ static void reload_systick(void)
 
 static void dispatcher(task_switch_type_e type)
 {
+	uint8_t next_task_index = idle_task_index;
+	uint8_t highest_priority_yet = 0;
+	/* Search for the highest priority task among the READY/RUNNING tasks. */
+	rtos_tcb_t * task_ptr;
+	for(task_ptr = idle_task_addr; &task_list.tasks[RTOS_MAX_NUMBER_OF_TASKS] > task_ptr; task_ptr++)
+	{
+
+		if(
+			(highest_priority_yet < task_ptr->priority)                         &&
+			(S_READY == task_ptr->priority || S_RUNNING == task_ptr->priority)
+		  )
+		{
+			next_task_index      = ((uint8_t) (task_ptr - task_list.tasks));
+			highest_priority_yet = task_ptr->priority;
+		}
+
+	}
+
+	if( task_list.current_task != next_task_index )
+	{
+		context_switch(kFromNormalExec);
+	}
+
 
 }
 
 FORCE_INLINE static void context_switch(task_switch_type_e type)
 {
+	if(0 == first_context_switch)
+	{
+		first_context_switch = 0xF4;	// Arbitrary nonzero value
+		register uint32_t SP_reg asm("SP");
+		current_task_ptr->sp++;
+		*(current_task_ptr->sp) = SP_reg;
+	}
 
+	task_list.current_task = task_list.current_task;
+	current_task_ptr->state = S_RUNNING;
+	PendSV_Handler();
 }
 
 static void activate_waiting_tasks()
 {
+	rtos_tcb_t * task_ptr;
+	for(task_ptr = idle_task_addr; &task_list.tasks[RTOS_MAX_NUMBER_OF_TASKS] > task_ptr; task_ptr++)
+	{
+		if(S_WAITING == task_ptr->state)
+		{
+			task_ptr->local_tick--;
+			if(0 == task_ptr->local_tick) task_ptr->state = S_READY;
+		}
 
+	}
 }
 
 /**********************************************************************************/
@@ -271,5 +338,6 @@ static void refresh_is_alive(void)
 		count++;
 	}
 }
+
 #endif
 ///
