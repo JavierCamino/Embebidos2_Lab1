@@ -48,8 +48,7 @@ static void refresh_is_alive(void);
 
 #define current_task_ptr ( (rtos_tcb_t*) &(task_list.tasks[task_list.current_task]) )
 #define newborn_task_ptr ( (rtos_tcb_t*) &(task_list.tasks[task_list.nTasks])       )
-#define idle_task_index  0U
-#define idle_task_addr   ( (rtos_tcb_t*) &(task_list.tasks[idle_task_index])        )
+#define first_task_addr  ( (rtos_tcb_t*) &(task_list.tasks[0])                      )
 
 /**********************************************************************************/
 // Type definitions
@@ -90,7 +89,8 @@ struct
 { 0 };
 
 // Global static flag of first context switch
-uint8_t first_context_switch = 0;
+static uint8_t first_context_switch = 0;
+uint8_t idle_task_index = 3;
 
 /**********************************************************************************/
 // Local methods prototypes
@@ -127,6 +127,7 @@ void rtos_start_scheduler(void)
 
 	/* Create idle task. */
 	rtos_create_task(idle_task, 0, kAutoStart);
+	idle_task_index = task_list.nTasks - 1;
 
 
 	/* Infinite loop. */
@@ -214,7 +215,7 @@ static void dispatcher(task_switch_type_e type)
 	uint8_t highest_priority_yet = 0;
 	/* Search for the highest priority task among the READY/RUNNING tasks. */
 	rtos_tcb_t * task_ptr;
-	for(task_ptr = idle_task_addr; &task_list.tasks[RTOS_MAX_NUMBER_OF_TASKS] > task_ptr; task_ptr++)
+	for(task_ptr = first_task_addr; &task_list.tasks[RTOS_MAX_NUMBER_OF_TASKS] > task_ptr; task_ptr++)
 	{
 
 		if(
@@ -238,23 +239,13 @@ static void dispatcher(task_switch_type_e type)
 // Function 8:
 FORCE_INLINE static void context_switch(task_switch_type_e type)
 {
-	if(0 == first_context_switch)
-	{
-		first_context_switch = 0xF4;	// Arbitrary nonzero value
-		register uint32_t SP_reg asm("SP");
-		current_task_ptr->sp++;
-		*(current_task_ptr->sp) = SP_reg;
-	}
 
-	task_list.current_task = task_list.current_task;
-	current_task_ptr->state = S_RUNNING;
-	SCB->ICSR |= SCB_ICSR_PENDSTSET_Msk;
 }
 // Function 9: Ready
 static void activate_waiting_tasks()
 {
 	rtos_tcb_t * task_ptr;
-	for(task_ptr = idle_task_addr; &task_list.tasks[RTOS_MAX_NUMBER_OF_TASKS] > task_ptr; task_ptr++)
+	for(task_ptr = first_task_addr; &task_list.tasks[RTOS_MAX_NUMBER_OF_TASKS] > task_ptr; task_ptr++)
 	{
 		if(S_WAITING == task_ptr->state)
 		{
