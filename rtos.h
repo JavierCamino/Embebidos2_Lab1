@@ -1,13 +1,3 @@
-̣/**
- * @file rtos.h
- * @author ITESO
- * @date Feb 2018
- * @brief rtos API
- *
- * This is the API definition of the rtos for the
- * embedded systems course at ITESO
- */
-
 #ifndef SOURCE_RTOS_H_
 #define SOURCE_RTOS_H_
 

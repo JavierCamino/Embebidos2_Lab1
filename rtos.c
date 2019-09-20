@@ -239,7 +239,15 @@ static void dispatcher(task_switch_type_e type)
 // Function 8:
 FORCE_INLINE static void context_switch(task_switch_type_e type)
 {
-
+	if(0 == first_context_switch)
+	{
+		register int32_t R0 asm("r0");
+		(void) R0;
+		*(current_task_ptr->sp) = R0;
+	}
+	task_list.current_task = task_list.next_task;
+	current_task_ptr->state = S_RUNNING;
+	SCB->ICSR |= SCB_ICSR_PENDSTSET_Msk;
 }
 // Function 9: Ready
 static void activate_waiting_tasks()
