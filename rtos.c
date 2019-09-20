@@ -46,10 +46,10 @@ static void refresh_is_alive(void);
 // Name substitutions
 /**********************************************************************************/
 
-#define current_task_ptr &task_list.tasks[task_list.current_task]
-#define newborn_task_ptr &task_list.tasks[task_list.nTasks]
-#define idle_task_index 0
-#define idle_task_addr &task_list.tasks[idel_task_index]
+#define current_task_ptr ( (rtos_tcb_t*) &(task_list.tasks[task_list.current_task]) )
+#define newborn_task_ptr ( (rtos_tcb_t*) &(task_list.tasks[task_list.nTasks])       )
+#define idle_task_index  0U
+#define idle_task_addr   ( (rtos_tcb_t*) &(task_list.tasks[idle_task_index])        )
 
 /**********************************************************************************/
 // Type definitions
@@ -106,7 +106,7 @@ static void idle_task(void);
 // API implementation
 /**********************************************************************************/
 
-
+// Function 1: Ready
 void rtos_start_scheduler(void)
 {
 
@@ -132,7 +132,7 @@ void rtos_start_scheduler(void)
 	/* Infinite loop. */
 	for (;;);
 }
-
+// Function 2: Ready
 rtos_task_handle_t rtos_create_task(void (*task_body)(), uint8_t priority,
 		rtos_autostart_e autostart)
 {
@@ -157,13 +157,13 @@ rtos_task_handle_t rtos_create_task(void (*task_body)(), uint8_t priority,
 	 * */
 	newborn_task_ptr->priority 	 = priority;
 	newborn_task_ptr->state      = (kAutoStart == autostart) ? (S_READY) : (S_SUSPENDED);
-	newborn_task_ptr->sp		 = newborn_task_ptr->stack[RTOS_STACK_SIZE - STACK_FRAME_SIZE];
+	newborn_task_ptr->sp		 = &newborn_task_ptr->stack[RTOS_STACK_SIZE - STACK_FRAME_SIZE];
 	newborn_task_ptr->task_body  = task_body;
 	newborn_task_ptr->local_tick = 0;
 
 	/* Initialize the newborn task's stack frame */
 	newborn_task_ptr->stack[RTOS_STACK_SIZE - STACK_PSR_OFFSET] = STACK_PSR_DEFAULT;
-	newborn_task_ptr->stack[RTOS_STACK_SIZE - STACK_LR_OFFSET ] = task_body;
+	newborn_task_ptr->stack[RTOS_STACK_SIZE - STACK_LR_OFFSET ] = ((uint32_t) task_body);
 
 
 	/* Increment the number of tasks on the system. */
@@ -172,25 +172,25 @@ rtos_task_handle_t rtos_create_task(void (*task_body)(), uint8_t priority,
 	/* Return the newborn task index on the task list. */
 	return task_list.nTasks;
 }
-
+// Function 3: Ready
 rtos_tick_t rtos_get_clock(void)
 {
 	return ( (rtos_tick_t) CLOCK_GetCoreSysClkFreq() );
 }
-
+// Function 4: Ready
 void rtos_delay(rtos_tick_t ticks)
 {
 	current_task_ptr->state      = S_WAITING;
 	current_task_ptr->local_tick = ticks;
 	dispatcher(kFromNormalExec);
 }
-
+// Function 5: Ready
 void rtos_suspend_task(void)
 {
 	current_task_ptr->state = S_SUSPENDED;
 	dispatcher(kFromNormalExec);
 }
-
+// Function 6: Ready
 void rtos_activate_task(rtos_task_handle_t task)
 {
 	current_task_ptr->state = S_READY;
@@ -207,7 +207,7 @@ static void reload_systick(void)
 	        CLOCK_GetCoreSysClkFreq());
 	SysTick->VAL = 0;
 }
-
+// Function 7: Ready (prototype)
 static void dispatcher(task_switch_type_e type)
 {
 	uint8_t next_task_index = idle_task_index;
@@ -218,8 +218,8 @@ static void dispatcher(task_switch_type_e type)
 	{
 
 		if(
-			(highest_priority_yet < task_ptr->priority)                         &&
-			(S_READY == task_ptr->priority || S_RUNNING == task_ptr->priority)
+			(highest_priority_yet < task_ptr->priority)                    &&
+			(S_READY == task_ptr->state || S_RUNNING == task_ptr->state)
 		  )
 		{
 			next_task_index      = ((uint8_t) (task_ptr - task_list.tasks));
@@ -235,7 +235,7 @@ static void dispatcher(task_switch_type_e type)
 
 
 }
-
+// Function 8:
 FORCE_INLINE static void context_switch(task_switch_type_e type)
 {
 	if(0 == first_context_switch)
@@ -248,9 +248,9 @@ FORCE_INLINE static void context_switch(task_switch_type_e type)
 
 	task_list.current_task = task_list.current_task;
 	current_task_ptr->state = S_RUNNING;
-	PendSV_Handler();
+	SCB->ICSR |= SCB_ICSR_PENDSTSET_Msk;
 }
-
+// Function 9: Ready
 static void activate_waiting_tasks()
 {
 	rtos_tcb_t * task_ptr;
@@ -281,17 +281,24 @@ static void idle_task(void)
 // ISR implementation
 /****************************************************/
 
+// Function 10: Ready
 void SysTick_Handler(void)
 {
 #ifdef RTOS_ENABLE_IS_ALIVE
 	refresh_is_alive();
 #endif
+
+	task_list.global_tick++;
 	activate_waiting_tasks();
 	reload_systick();
+	dispatcher(kFromISR);
 }
 
+// Function 11: Ready
 void PendSV_Handler(void)
 {
+	// PENDSVCLR y PENDSVSET
+
 	register int32_t r0 asm("r0");
 	(void) r0;
 	SCB->ICSR |= SCB_ICSR_PENDSVCLR_Msk;
