@@ -88,9 +88,7 @@ struct
 } task_list =
 { 0 };
 
-// Global static flag of first context switch
-static uint8_t first_context_switch = 0;
-uint8_t idle_task_index = 3;
+
 
 /**********************************************************************************/
 // Local methods prototypes
@@ -106,7 +104,7 @@ static void idle_task(void);
 // API implementation
 /**********************************************************************************/
 
-// Function 1: Ready
+// Function 1: Verified
 void rtos_start_scheduler(void)
 {
 
@@ -116,29 +114,31 @@ void rtos_start_scheduler(void)
 #endif
 
 
+
+	/* Reset global clock */
+	task_list.global_tick = 0;
+	/* Initial state: no task running */
+	task_list.current_task = -1;
+
+	/* Create idle task. */
+	rtos_create_task(idle_task, 0, kAutoStart);
+
 	/* Enable the SysTick timer. */
-	SysTick->CTRL = SysTick_CTRL_CLKSOURCE_Msk | SysTick_CTRL_TICKINT_Msk
-	        | SysTick_CTRL_ENABLE_Msk;
+	SysTick->CTRL = SysTick_CTRL_CLKSOURCE_Msk | SysTick_CTRL_TICKINT_Msk |
+					SysTick_CTRL_ENABLE_Msk;
 
 
 	/* Reload the SysTick with a 0. */
 	reload_systick();
-
-
-	/* Create idle task. */
-	rtos_create_task(idle_task, 0, kAutoStart);
-	idle_task_index = task_list.nTasks - 1;
-
-
 	/* Infinite loop. */
 	for (;;);
 }
-// Function 2: Ready
+// Function 2: Verified
 rtos_task_handle_t rtos_create_task(void (*task_body)(), uint8_t priority,
 		rtos_autostart_e autostart)
 {
 	/* If there is no more space for tasks, return error. */
-		if( (RTOS_MAX_NUMBER_OF_TASKS - 1) < task_list.nTasks )	return (-1);
+	if( (RTOS_MAX_NUMBER_OF_TASKS - 1) < task_list.nTasks )	return (-1);
 
 
 
@@ -171,12 +171,12 @@ rtos_task_handle_t rtos_create_task(void (*task_body)(), uint8_t priority,
 	task_list.nTasks++;
 
 	/* Return the newborn task index on the task list. */
-	return task_list.nTasks;
+	return (task_list.nTasks - 1U);
 }
 // Function 3: Ready
 rtos_tick_t rtos_get_clock(void)
 {
-	return ( (rtos_tick_t) CLOCK_GetCoreSysClkFreq() );
+	return ( task_list.global_tick );
 }
 // Function 4: Ready
 void rtos_delay(rtos_tick_t ticks)
@@ -208,14 +208,14 @@ static void reload_systick(void)
 	        CLOCK_GetCoreSysClkFreq());
 	SysTick->VAL = 0;
 }
-// Function 7: Ready (prototype)
+// Function 7: Verified
 static void dispatcher(task_switch_type_e type)
 {
-	uint8_t next_task_index = idle_task_index;
-	uint8_t highest_priority_yet = 0;
+	int8_t next_task_index      = -1;
+	int8_t highest_priority_yet = -1;
 	/* Search for the highest priority task among the READY/RUNNING tasks. */
-	rtos_tcb_t * task_ptr;
-	for(task_ptr = first_task_addr; &task_list.tasks[RTOS_MAX_NUMBER_OF_TASKS] > task_ptr; task_ptr++)
+	rtos_tcb_t * task_ptr       = 0U;
+	for(task_ptr = first_task_addr; &(task_list.tasks[RTOS_MAX_NUMBER_OF_TASKS]) > task_ptr; task_ptr++)
 	{
 
 		if(
@@ -223,37 +223,48 @@ static void dispatcher(task_switch_type_e type)
 			(S_READY == task_ptr->state || S_RUNNING == task_ptr->state)
 		  )
 		{
-			next_task_index      = ((uint8_t) (task_ptr - task_list.tasks));
+			next_task_index      = ((uint8_t) (task_ptr - first_task_addr));
 			highest_priority_yet = task_ptr->priority;
 		}
 
 	}
 
-	if( task_list.current_task != next_task_index )
-	{
-		context_switch(kFromNormalExec);
-	}
+	/* Update the next task to be executed */
+	task_list.next_task = next_task_index;
+
+	/* If necessary, perform a context switch. */
+	if( task_list.next_task != task_list.current_task )	context_switch(kFromNormalExec);
 
 
 }
-// Function 8:
+// Function 8: Verified
 FORCE_INLINE static void context_switch(task_switch_type_e type)
 {
-	if(0 == first_context_switch)
+	static uint8_t first_context_switch = 1;
+	register uint32_t r0 asm("r0");
+
+	(void) r0;
+
+	if(!first_context_switch)
 	{
-		register int32_t R0 asm("r0");
-		(void) R0;
-		*(current_task_ptr->sp) = R0;
+		asm("mov r0, r7");
+		current_task_ptr->sp  = ((uint32_t*) r0);
+		current_task_ptr->sp += (kFromNormalExec == type) ? (-(STACK_FRAME_SIZE + 1)) : (STACK_FRAME_SIZE + 1);
 	}
+	else
+	{
+		first_context_switch = 0;
+	}
+
 	task_list.current_task = task_list.next_task;
 	current_task_ptr->state = S_RUNNING;
 	SCB->ICSR |= SCB_ICSR_PENDSTSET_Msk;
 }
-// Function 9: Ready
+// Function 9: Verified
 static void activate_waiting_tasks()
 {
 	rtos_tcb_t * task_ptr;
-	for(task_ptr = first_task_addr; &task_list.tasks[RTOS_MAX_NUMBER_OF_TASKS] > task_ptr; task_ptr++)
+	for(task_ptr = first_task_addr; &(task_list.tasks[RTOS_MAX_NUMBER_OF_TASKS]) > task_ptr; task_ptr++)
 	{
 		if(S_WAITING == task_ptr->state)
 		{
@@ -270,30 +281,32 @@ static void activate_waiting_tasks()
 
 static void idle_task(void)
 {
-	for (;;)
-	{
-
-	}
+	for (;;);
 }
 
 /****************************************************/
 // ISR implementation
 /****************************************************/
 
-// Function 10: Ready
+// Function 10: Verified
 void SysTick_Handler(void)
 {
+	register uint32_t* sp asm("sp");
+	(void) sp;
+	register uint32_t* r0 asm("r0");
+	(void) r0;
+	task_list.global_tick++;
+
 #ifdef RTOS_ENABLE_IS_ALIVE
 	refresh_is_alive();
 #endif
 
-	task_list.global_tick++;
 	activate_waiting_tasks();
 	reload_systick();
 	dispatcher(kFromISR);
 }
 
-// Function 11: Ready
+// Function 11: Verified
 void PendSV_Handler(void)
 {
 	// PENDSVCLR y PENDSVSET
@@ -301,7 +314,7 @@ void PendSV_Handler(void)
 	register int32_t r0 asm("r0");
 	(void) r0;
 	SCB->ICSR |= SCB_ICSR_PENDSVCLR_Msk;
-	r0 		   = (int32_t) task_list.tasks[task_list.current_task].sp;
+	r0 = (int32_t) task_list.tasks[task_list.current_task].sp;
 	asm("mov r7, r0");
 }
 
