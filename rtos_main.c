@@ -40,9 +40,9 @@ void dummy_task3(void)
 
 int main(void)
 {
-	BOARD_InitPins();
-	BOARD_BootClockRUN();
-	BOARD_InitDebugConsole();
+    BOARD_InitBootPins();
+    BOARD_InitBootClocks();
+    BOARD_InitDebugConsole();
 
 	rtos_create_task(dummy_task1, 1, kAutoStart);
 	rtos_create_task(dummy_task2, 2, kAutoStart);
