@@ -4,7 +4,7 @@
 //                  to hang application when debugger not connected.
 //
 // ****************************************************************************
-// Copyright 2017-2019 NXP
+// Copyright(C) NXP Semiconductors, 2017
 // All rights reserved.
 //
 // Software that is described herein is for illustrative purposes only
@@ -69,7 +69,7 @@
 
 __attribute__((naked))
 void HardFault_Handler(void){
-    __asm(  ".syntax unified\n"
+     __asm(  ".syntax unified\n"
         // Check which stack is in use
             "MOVS   R0, #4  \n"
             "MOV    R1, LR  \n"
@@ -98,8 +98,7 @@ void HardFault_Handler(void){
     	// 32 is slightly arbitrary, but appears to allow most
     	// C Library IO functions sitting on top of semihosting to
     	// continue to operate to some degree
-    		    "MOVS   R1,#32 \n"
-    		    "STR R1,[ R0,#0 ] \n" // R0 is at location 0 on stack
+    		"MOVS   R0,#32 \n"
     	// Return from hard fault handler to application
             "BX LR \n"
         ".syntax divided\n") ;

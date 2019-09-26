@@ -44,6 +44,8 @@ int main(void)
     BOARD_InitBootClocks();
     BOARD_InitDebugConsole();
 
+    PRINTF("Initialization successful!\r\n");
+
 	rtos_create_task(dummy_task1, 1, kAutoStart);
 	rtos_create_task(dummy_task2, 2, kAutoStart);
 	rtos_create_task(dummy_task3, 1, kAutoStart);
