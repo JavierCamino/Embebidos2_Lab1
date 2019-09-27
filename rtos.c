@@ -40,6 +40,15 @@ static void init_is_alive(void);
 static void refresh_is_alive(void);
 #endif
 
+
+/**********************************************************************************/
+// Name substitution
+/**********************************************************************************/
+#define current_task_ptr ((rtos_tcb_t*) &(task_list.tasks[task_list.current_task]))
+#define newborn_task_ptr ((rtos_tcb_t*) &(task_list.tasks[task_list.nTasks]))
+#define indexed_task_ptr ((rtos_tcb_t*) &(task_list.tasks[index_sweep]))
+
+
 /**********************************************************************************/
 // Type definitions
 /**********************************************************************************/
@@ -129,14 +138,14 @@ rtos_task_handle_t rtos_create_task(void (*task_body)(), uint8_t priority,
 	 */
 
 	/* Creation of idle task */
-	task_list.tasks[task_list.nTasks].priority   = priority;
-	task_list.tasks[task_list.nTasks].state      = (kAutoStart == autostart) ? (S_READY) : (S_SUSPENDED);
-	task_list.tasks[task_list.nTasks].task_body  = task_body;
-	task_list.tasks[task_list.nTasks].local_tick = 0;
-	task_list.tasks[task_list.nTasks].sp         = &(task_list.tasks[task_list.nTasks].stack[RTOS_STACK_SIZE - 1U - STACK_FRAME_SIZE]);
+	newborn_task_ptr->priority   = priority;
+	newborn_task_ptr->state      = (kAutoStart == autostart) ? (S_READY) : (S_SUSPENDED);
+	newborn_task_ptr->task_body  = task_body;
+	newborn_task_ptr->local_tick = 0;
+	newborn_task_ptr->sp         = &(newborn_task_ptr->stack[RTOS_STACK_SIZE - 1U - STACK_FRAME_SIZE]);
 
-	task_list.tasks[task_list.nTasks].stack[RTOS_STACK_SIZE - STACK_LR_OFFSET]  = ((uint32_t) (task_body));
-	task_list.tasks[task_list.nTasks].stack[RTOS_STACK_SIZE - STACK_PSR_OFFSET] = STACK_PSR_DEFAULT;
+	newborn_task_ptr->stack[RTOS_STACK_SIZE - STACK_LR_OFFSET]  = ((uint32_t) (task_body));
+	newborn_task_ptr->stack[RTOS_STACK_SIZE - STACK_PSR_OFFSET] = STACK_PSR_DEFAULT;
 
 	/* Increment the number of registered tasks */
 	task_list.nTasks++;
@@ -153,14 +162,14 @@ rtos_tick_t rtos_get_clock(void)
 
 void rtos_delay(rtos_tick_t ticks)
 {
-	task_list.tasks[task_list.current_task].state      = S_WAITING;
-	task_list.tasks[task_list.current_task].local_tick = ticks;
+	current_task_ptr->state      = S_WAITING;
+	current_task_ptr->local_tick = ticks;
 	dispatcher(kFromNormalExec);
 }
 
 void rtos_suspend_task(void)
 {
-	task_list.tasks[task_list.current_task].state = S_SUSPENDED;
+	current_task_ptr->state = S_SUSPENDED;
 	dispatcher(kFromNormalExec);
 }
 
@@ -191,11 +200,11 @@ static void dispatcher(task_switch_type_e type)
 	for(index_sweep = 0; index_sweep < task_list.nTasks; index_sweep++)
 	{
 
-		if( (S_READY == task_list.tasks[index_sweep].state) || (S_RUNNING == task_list.tasks[index_sweep].state) )
+		if( (S_READY == indexed_task_ptr->state) || (S_RUNNING == indexed_task_ptr->state) )
 		{
-			if(task_list.tasks[index_sweep].priority >= highest_priority_yet)
+			if(indexed_task_ptr->priority >= highest_priority_yet)
 			{
-				highest_priority_yet = task_list.tasks[index_sweep].priority;
+				highest_priority_yet = indexed_task_ptr->priority;
 				task_list.next_task  = index_sweep;
 			}
 		}
@@ -228,8 +237,8 @@ FORCE_INLINE static void context_switch(task_switch_type_e type)
 	if (0 == first_time_on_function)
 	{
 		/* Assign the task the corresponding offseted SP */
-		task_list.tasks[task_list.current_task].sp  = ((uint32_t *) (sp));
-		task_list.tasks[task_list.current_task].sp += (kFromNormalExec == type) ? (-(STACK_FRAME_SIZE + 1)) : (STACK_FRAME_SIZE + 1);
+		current_task_ptr->sp  = ((uint32_t *) (sp));
+		current_task_ptr->sp += (kFromNormalExec == type) ? (-(STACK_FRAME_SIZE + 1)) : (STACK_FRAME_SIZE + 1);
 	}
 	else
 	{
@@ -240,7 +249,7 @@ FORCE_INLINE static void context_switch(task_switch_type_e type)
 
 	/* Update the register of the new current task */
 	task_list.current_task = task_list.next_task;
-	task_list.tasks[task_list.current_task].state = S_RUNNING;
+	current_task_ptr->state = S_RUNNING;
 	SCB->ICSR |= SCB_ICSR_PENDSVSET_Msk;
 
 }
@@ -255,15 +264,15 @@ static void activate_waiting_tasks()
 		for(index_sweep = 0; index_sweep < task_list.nTasks; index_sweep++)
 		{
 
-			if(S_WAITING == task_list.tasks[index_sweep].state)
+			if(S_WAITING == indexed_task_ptr->state)
 			{
 				/* Decrement local clock. */
-				task_list.tasks[index_sweep].local_tick--;
+				indexed_task_ptr->local_tick--;
 
 				/* Wake up task if clock reaches zero. */
-				if(0 == task_list.tasks[index_sweep].local_tick)
+				if(0 == indexed_task_ptr->local_tick)
 				{
-					task_list.tasks[index_sweep].state = S_RUNNING;
+					indexed_task_ptr->state = S_RUNNING;
 				}
 
 			}
@@ -301,7 +310,7 @@ void PendSV_Handler(void)
 	register uint32_t r0 asm("r0");
 	(void) r0;
 	SCB->ICSR |= SCB_ICSR_PENDSVCLR_Msk;
-	r0 = ((uint32_t) (task_list.tasks[task_list.current_task].sp));
+	r0 = ((uint32_t) (current_task_ptr->sp));
 	asm("mov r7, r0");
 }
 
