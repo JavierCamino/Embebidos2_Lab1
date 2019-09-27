@@ -99,6 +99,7 @@ void rtos_start_scheduler(void)
 #endif
 
 	/* Reload global clock */
+	task_list.global_tick = 0;
 	SysTick->CTRL = SysTick_CTRL_CLKSOURCE_Msk | SysTick_CTRL_TICKINT_Msk
 	        | SysTick_CTRL_ENABLE_Msk;
 	reload_systick();
@@ -113,7 +114,7 @@ void rtos_start_scheduler(void)
 rtos_task_handle_t rtos_create_task(void (*task_body)(), uint8_t priority,
 		rtos_autostart_e autostart)
 {
-	/* Validat there is still room for an extra task. */
+	/* Validate there is still room for an extra task. */
 	if(RTOS_MAX_NUMBER_OF_TASKS <= task_list.nTasks) return -1;
 
 	/* Task body structure:
@@ -183,19 +184,20 @@ static void dispatcher(task_switch_type_e type)
 {
 	/* Find the highest priority running task and mark it as the next task to execute. */
 	uint8_t highest_priority_yet = 0;
+	task_list.next_task = 0;
 
 	/* Sweep the task list in search of the highest priority. */
 	uint8_t index_sweep = 0;
 	for(index_sweep = 0; index_sweep < task_list.nTasks; index_sweep++)
 	{
 
-		if(
-			(task_list.tasks[index_sweep].priority > highest_priority_yet)                                    	&&
-			(S_READY == task_list.tasks[index_sweep].state || S_RUNNING == task_list.tasks[index_sweep].state)
-		  )
+		if( (S_READY == task_list.tasks[index_sweep].state) || (S_RUNNING == task_list.tasks[index_sweep].state) )
 		{
-			highest_priority_yet = task_list.tasks[index_sweep].priority;
-			task_list.next_task  = index_sweep;
+			if(task_list.tasks[index_sweep].priority >= highest_priority_yet)
+			{
+				highest_priority_yet = task_list.tasks[index_sweep].priority;
+				task_list.next_task  = index_sweep;
+			}
 		}
 
 	}
@@ -226,8 +228,8 @@ FORCE_INLINE static void context_switch(task_switch_type_e type)
 	if (0 == first_time_on_function)
 	{
 		/* Assign the task the corresponding offseted SP */
-		task_list.tasks[task_list.current_task].sp = (kFromNormalExec == type) ? ((uint32_t *) (sp - 9U)) : ((uint32_t *) (sp + 11U));
-//		task_list.tasks[task_list.current_task].sp += (kFromNormalExec == type) ? (-(STACK_FRAME_SIZE + 1)) : (STACK_FRAME_SIZE + 1);
+		task_list.tasks[task_list.current_task].sp  = ((uint32_t *) (sp));
+		task_list.tasks[task_list.current_task].sp += (kFromNormalExec == type) ? (-(STACK_FRAME_SIZE + 1)) : (STACK_FRAME_SIZE + 1);
 	}
 	else
 	{
@@ -255,14 +257,15 @@ static void activate_waiting_tasks()
 
 			if(S_WAITING == task_list.tasks[index_sweep].state)
 			{
-				if(0 != task_list.tasks[index_sweep].local_tick)
-				{
-					task_list.tasks[index_sweep].local_tick--;
-				}
-				else
+				/* Decrement local clock. */
+				task_list.tasks[index_sweep].local_tick--;
+
+				/* Wake up task if clock reaches zero. */
+				if(0 == task_list.tasks[index_sweep].local_tick)
 				{
 					task_list.tasks[index_sweep].state = S_RUNNING;
 				}
+
 			}
 
 		}
@@ -296,6 +299,7 @@ void SysTick_Handler(void)
 void PendSV_Handler(void)
 {
 	register uint32_t r0 asm("r0");
+	(void) r0;
 	SCB->ICSR |= SCB_ICSR_PENDSVCLR_Msk;
 	r0 = ((uint32_t) (task_list.tasks[task_list.current_task].sp));
 	asm("mov r7, r0");
